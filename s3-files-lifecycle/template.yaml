@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  s3 files lifecycle script
+Globals:
+  Function:
+    Timeout: 4
+Parameters:
+  S3BucketName:
+    Type: String
+    Default: mybucketname
+  S3Bucketpath:
+    Type: String
+    Default: folder-name/
+  Cronjob:
+    Type: String
+    Default: cron(0 19 */2 * ? *)
+  RetainDays:
+    Type: Number
+    Default: 7
+  EnvironmentName:
+    Description: Environment Name
+    Type: String
+    AllowedValues:
+      - dev
+      - prod
+    Default: dev
+    ConstraintDescription: must be dev or prod
+Resources:
+  s3CleanFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt
+        - S3LambdaRole
+        - Arn
+      Environment:
+        Variables:
+          BucketName: !Ref S3BucketName
+          Folder: !Ref S3Bucketpath
+          Retaindays: !Ref RetainDays
+  S3LambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: Cleans3LambdaRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                -
+lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: accesspolicys
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*"
+              - Effect: Allow
+                Action:
+                  - "s3:List*"
+                  - "s3:GetObject*"
+                  - "s3:Delete*"
+                Resource:
+                  - Fn::Sub: arn:aws:s3:::${S3BucketName}
+                  - Fn::Sub: arn:aws:s3:::${S3BucketName}/*
+  ScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "ScheduledRule"
+      ScheduleExpression: !Ref "Cronjob"
+      State: "ENABLED"
+      Targets:
+        - Arn:
+            Fn::GetAtt:
+              - "s3CleanFunction"
+              - "Arn"
+          Id: "TargetFunctionV1"
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref "s3CleanFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "ScheduledRule"
+          - "Arn"
